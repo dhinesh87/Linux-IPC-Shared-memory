@@ -1,8 +1,8 @@
-# Linux-IPC-Semaphores
-Ex05-Linux IPC-Semaphores
+# Linux-IPC-Shared-memory
+Ex06-Linux IPC-Shared-memory
 
 # AIM:
-To Write a C program that implements a producer-consumer system with two processes using Semaphores.
+To Write a C program that illustrates two processes communicating using shared memory.
 
 # DESIGN STEPS:
 
@@ -12,7 +12,7 @@ Navigate to any Linux environment installed on the system or installed inside a 
 
 ### Step 2:
 
-Write the C Program using Linux Process API - Sempahores
+Write the C Program using Linux Process API - Shared Memory
 
 ### Step 3:
 
@@ -20,103 +20,141 @@ Execute the C Program for the desired output.
 
 # PROGRAM:
 
-## Write a C program that implements a producer-consumer system with two processes using Semaphores.:
+## Write a C program that illustrates two processes communicating using shared memory.
+## shmry1.c
 ```c
-/*
- * sem.c  - demonstrates a basic producer-consumer
- *                            implementation.              */
-#include <stdio.h>	 /* standard I/O routines.              */
-#include <stdlib.h>      /* rand() and srand() functions        */
-#include <unistd.h>	 /* fork(), etc.                        */
-#include <time.h>	 /* nanosleep(), etc.                   */
-#include <sys/types.h>   /* various type definitions.           */
-#include <sys/ipc.h>     /* general SysV IPC structures         */
-#include <sys/sem.h>	 /* semaphore functions and structs.    */
-#define NUM_LOOPS	20	 /* number of loops to perform. */
-#if defined(__GNU_LIBRARY__) && !defined(_SEM_SEMUN_UNDEFINED)
-/* union semun is defined by including <sys/sem.h> */
-#else
-/* according to X/OPEN we have to define it ourselves */
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/shm.h>
 
-union semun {
-        int val;                    /* value for SETVAL */
-        struct semid_ds *buf;       /* buffer for IPC_STAT, IPC_SET */
-        unsigned short int *array;  /* array for GETALL, SETALL */
-        struct seminfo *__buf;      /* buffer for IPC_INFO */
+#define TEXT_SZ 2048
+
+struct shared_use_st {
+    int written_by_you;
+    char some_text[TEXT_SZ];
 };
-#endif
-int main(int argc, char* argv[])
-{
-    int sem_set_id;	      /* ID of the semaphore set.       */
-    union semun sem_val;      /* semaphore value, for semctl(). */
-    int child_pid;	      /* PID of our child process.      */
-    int i;		      /* counter for loop operation.    */
-    struct sembuf sem_op;     /* structure for semaphore ops.   */
-    int rc;		      /* return value of system calls.  */
-    struct timespec delay;    /* used for wasting time.         */
-/* create a private semaphore set with one semaphore in it, */
-    /* with access only to the owner.                           */
-    sem_set_id = semget(IPC_PRIVATE, 1, 0600);
-    if (sem_set_id == -1) {
-	perror("main: semget");
-	exit(1);
+
+int main() {
+    int running = 1;
+    void *shared_memory = (void *)0;
+    struct shared_use_st *shared_stuff;
+    int shmid;
+
+    shmid = shmget((key_t)1234, sizeof(struct shared_use_st), 0666 | IPC_CREAT);
+    printf("Shared memory id is %d \n", shmid);
+    if (shmid == -1) {
+        fprintf(stderr, "shmget failed\n");
+        exit(EXIT_FAILURE);
     }
-    printf("semaphore set created, semaphore set id '%d'.\n", sem_set_id);
-    /* intialize the first (and single) semaphore in our set to '0'. */
-    sem_val.val = 0;
-    rc = semctl(sem_set_id, 0, SETVAL, sem_val);
-    /* fork-off a child process, and start a producer/consumer job. */
-    child_pid = fork();
-    switch (child_pid) {
-	case -1:	/* fork() failed */
-	    perror("fork");
-	    exit(1);
-case 0:		/* child process here */
-	    for (i=0; i<NUM_LOOPS; i++) {
-		/* block on the semaphore, unless it's value is non-negative. */
-		sem_op.sem_num = 0;
-		sem_op.sem_op = -1;
-		sem_op.sem_flg = 0;
-		semop(sem_set_id, &sem_op, 1);
-		printf("consumer: '%d'\n", i);
-		fflush(stdout);
-	    }
-	    break;
-	default:	/* parent process here */
-	    for (i=0; i<NUM_LOOPS; i++) {
-		printf("producer: '%d'\n", i);
-		fflush(stdout);
-		/* increase the value of the semaphore by 1. */
-		sem_op.sem_num = 0;
-sem_op.sem_op = 1;
-		sem_op.sem_flg = 0;
-		semop(sem_set_id, &sem_op, 1);
-		/* pause execution for a little bit, to allow the */
-		/* child process to run and handle some requests. */
-		/* this is done about 25% of the time.            */
-		if (rand() > 3*(RAND_MAX/4)) {
-	    	    delay.tv_sec = 0;
-	    	    delay.tv_nsec = 10;
-	    	    //nanosleep(&delay, NULL);
-		                      sleep(10); }
-if(NUM_LOOPS>=10)    {
-	    semctl(sem_set_id, 0, IPC_RMID, sem_val) ;} // Remove the sem_set_id
-	    }}
-	    break;
+
+    shared_memory = shmat(shmid, (void *)0, 0);
+    if (shared_memory == (void *)-1) {
+        fprintf(stderr, "shmat failed\n");
+        exit(EXIT_FAILURE);
     }
-    return 0;}
+
+    printf("Memory Attached at %p\n", shared_memory);
+    shared_stuff = (struct shared_use_st *)shared_memory;
+    shared_stuff->written_by_you = 0;
+
+    while (running) {
+        if (shared_stuff->written_by_you) {
+            printf("You Wrote: %s", shared_stuff->some_text);
+            sleep(rand() % 4);
+            shared_stuff->written_by_you = 0;
+
+            if (strncmp(shared_stuff->some_text, "end", 3) == 0) {
+                running = 0;
+            }
+        }
+    }
+
+    if (shmdt(shared_memory) == -1) {
+        fprintf(stderr, "shmdt failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (shmctl(shmid, IPC_RMID, 0) == -1) {
+        fprintf(stderr, "failed to delete\n");
+        exit(EXIT_FAILURE);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+```
+## shmry2.c
+```c
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/shm.h>
+
+#define TEXT_SZ 2048
+
+struct shared_use_st {
+    int written_by_you;
+    char some_text[TEXT_SZ];
+};
+
+int main() {
+    int running = 1;
+    void *shared_memory = (void *)0;
+    struct shared_use_st *shared_stuff;
+    char buffer[BUFSIZ];
+    int shmid;
+
+    shmid = shmget((key_t)1234, sizeof(struct shared_use_st), 0666 | IPC_CREAT);
+    printf("Shared memory id = %d \n", shmid);
+    if (shmid == -1) {
+        fprintf(stderr, "shmget failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    shared_memory = shmat(shmid, (void *)0, 0);
+    if (shared_memory == (void *)-1) {
+        fprintf(stderr, "shmat failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Memory Attached at %p\n", shared_memory);
+    shared_stuff = (struct shared_use_st *)shared_memory;
+
+    while (running) {
+        while (shared_stuff->written_by_you == 1) {
+            sleep(1);
+            printf("Waiting for client.\n");
+        }
+
+        printf("Enter Some Text: ");
+        fgets(buffer, BUFSIZ, stdin);
+        strncpy(shared_stuff->some_text, buffer, TEXT_SZ);
+        shared_stuff->written_by_you = 1;
+
+        if (strncmp(buffer, "end", 3) == 0) {
+            running = 0;
+        }
+    }
+
+    if (shmdt(shared_memory) == -1) {
+        fprintf(stderr, "shmdt failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    exit(EXIT_SUCCESS);
+}
 ```
 
 
 
-
 ## OUTPUT:
-## $ ./sem.o :
-![image](https://github.com/user-attachments/assets/2a3fba6e-7e7f-425b-b616-4d0c2a1045c4)
+![os exp 6 sc 1](https://github.com/user-attachments/assets/30c34217-6d06-436d-866f-c92f340fdedc)
 
 
-## $ ipcs:
-![image](https://github.com/user-attachments/assets/83b146e0-c129-4037-bf96-0d6259ff5843)
+![os exp 6 sc 2](https://github.com/user-attachments/assets/1c21a220-f6ce-43c0-bf9f-7566d5254ad4)
+![os exp 6 sc 3](https://github.com/user-attachments/assets/7efea50b-64b9-437c-a82b-e2fb7f01892b)
 
 
 
