@@ -1,6 +1,7 @@
 # Linux-IPC-Shared-memory
 Ex06-Linux IPC-Shared-memory
-
+## Name: Dhinesh M
+## Register No: 212223040040
 # AIM:
 To Write a C program that illustrates two processes communicating using shared memory.
 
